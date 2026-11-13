@@ -1,0 +1,42 @@
+[tool.poetry]
+name = "voz-civica"
+version = "0.1.0"
+description = "Assistente de voz local, de mão dupla — escuta contínua, transcrição, resposta via LLM local e síntese de voz, 100% offline."
+authors = ["Douglas"]
+license = "MIT"
+readme = "README.md"
+packages = [{ include = "voz_civica" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+faster-whisper = "^1.0.3"
+sounddevice = "^0.4.7"
+soundfile = "^0.12"
+numpy = "^1.26"
+silero-vad = "^5.1.2"
+piper-tts = "^1.2.0"
+fastapi = "^0.115"
+uvicorn = { extras = ["standard"], version = "^0.32" }
+pydantic-settings = "^2.5"
+ollama = "^0.4"
+rich = "^13.9"
+torch = { version = "^2.2", source = "pytorch-cpu" }
+torchaudio = { version = "^2.2", source = "pytorch-cpu" }
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3"
+black = "^23.12.0"
+isort = "^5.13.0"
+ruff = "^0.1.9"
+
+[tool.poetry.scripts]
+voz-civica = "voz_civica.cli:main"
+
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

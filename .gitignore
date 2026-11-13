@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Poetry / venv
+.venv/
+
+# Dados de runtime (regeneráveis, não versionados)
+data/raw_audio/*.wav
+data/sessions/*/*.json
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Modelos de voz baixados (pesados, não versionados)
+models/piper/*.onnx
+models/piper/*.onnx.json
+models/piper/.cache/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
