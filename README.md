@@ -3,7 +3,7 @@
 Assistente de voz de mão dupla: escuta contínua, transcreve, responde com LLM local e fala a resposta. Sem nuvem, sem API paga, sem custo recorrente — tudo roda na máquina (Silero VAD + faster-whisper + Ollama + Piper).
 
 > 🌱 **Projeto em início de desenvolvimento — Marco 1 de uma visão maior.**
-> A camada de captura e conversa está funcional e testada; as camadas de agregação, decisão e transparência pública ainda não existem. CLI, arquitetura interna e formato dos dados **podem mudar sem aviso**.
+> A camada de captura e conversa funciona de ponta a ponta em teste local (áudio → transcrição → resposta → voz). As camadas de agregação, decisão e transparência pública ainda não existem. CLI, arquitetura interna e formato dos dados **podem mudar sem aviso**.
 
 ---
 
@@ -13,13 +13,16 @@ Assistente de voz de mão dupla: escuta contínua, transcreve, responde com LLM 
 
 | Estágio | Implementado | Validado |
 |---|:--:|---|
-| Captura contínua com detecção de fala (VAD) | ✅ | ✅ testes automatizados |
-| Transcrição local (faster-whisper, `small`/`int8`, pt-BR) | ✅ | ✅ com fixture de áudio real |
-| Resposta via LLM local (Ollama) | ✅ | ✅ com Ollama rodando |
-| Síntese de voz (Piper) com anti-feedback | ✅ | ⚠️ só com arquivo — **não validado com mic + caixa simultâneos** |
-| UI pulsante no navegador (FastAPI + SSE) | ✅ | ✅ local |
-| Extração estruturada do relato (fila de backend) | ✅ | ✅ testes automatizados |
+| Captura contínua com detecção de fala (VAD) | ✅ | ✅ com arquivo `.wav` — microfone real: ⚠️ não testado |
+| Transcrição local (faster-whisper, `small`/`int8`, pt-BR) | ✅ | ✅ ponta a ponta, com áudio real |
+| Resposta via LLM local (Ollama) | ✅ | ✅ ponta a ponta, com Ollama rodando |
+| Síntese de voz (Piper) com anti-feedback | ✅ | ✅ gera e reproduz — **anti-feedback com mic + caixa: ⚠️ não validado** |
+| UI pulsante no navegador (FastAPI + WebSocket) | ✅ | ✅ servidor, botões e amplitude verificados por script |
+| Órbita reagindo à voz da IA (amplitude real do TTS) | ✅ | ✅ 326 amostras de amplitude em execução real |
+| Extração estruturada do relato (fila de backend) | ✅ | ⚠️ só testes unitários — 0 relatos gravados em execução real |
 | Interrupção da fala da IA (*barge-in*) | ❌ | — previsto, não implementado |
+
+**Última execução de ponta a ponta:** 13/11/2026, Arch Linux, CPU, sobre `tests/fixtures/sample_speech.wav` (2,5 s de áudio). Comando: `voz-civica capture --file ... --respond`. A UI foi verificada subindo `voz-civica live`, mas **sem conversa por microfone**.
 
 **Marcos seguintes** (não iniciados): agregação dos relatos, priorização, painel público de transparência.
 
@@ -48,13 +51,42 @@ Assistente de voz de mão dupla: escuta contínua, transcreve, responde com LLM 
 
 ---
 
+## 🖥️ Interface
+
+Uma bola. Três botões. Nada mais.
+
+O orb **pulsa apenas com a voz da IA**: durante a reprodução, o áudio do Piper é tocado em blocos de 50 ms, a amplitude (RMS) de cada bloco é normalizada pelo pico da própria fala e publicada por WebSocket a 25 Hz. Fora da fala a amplitude é 0.0 — o microfone **não** move a bola, ele só alimenta o pipeline.
+
+| Cor | Estado |
+|---|---|
+| Azul | ouvindo (respiração lenta) |
+| Âmbar | pensando (espera real do LLM) |
+| Verde | falando (pulso = volume real da voz) |
+| Cinza | pausado |
+
+| Botão | Ação | Atalho |
+|---|---|---|
+| pausar / retomar | para de processar fala do microfone (frames continuam sendo consumidos) | `espaço` |
+| silenciar voz / ativar voz | gera a resposta mas não fala em voz alta | `M` |
+| parar fala | interrompe a reprodução no meio (checado entre blocos) | `Esc` |
+
+Para ver a interface sem microfone, rodando sobre o áudio de teste:
+
+```bash
+poetry run voz-civica live --file tests/fixtures/sample_speech.wav --speak
+```
+
+---
+
 ## 📊 Números medidos
 
-- **10 testes automatizados**, todos passando (`pytest -q`).
-- **25 módulos Python**, ~1.590 linhas de aplicação + 208 linhas de teste.
+- **18 testes automatizados**, todos passando (`pytest -q`).
+- **25 módulos Python**, ~1.752 linhas de aplicação + 358 linhas de teste.
+- **Transcrição: ~1,6–1,9 s** para 2,5 s de áudio (faster-whisper `small`, `int8`, CPU) — medido em 13/11/2026.
+- **Orb: 326 amostras de amplitude** na fala de uma resposta, 86 níveis distintos, 24% no topo — medido via WebSocket.
 - **0 chamadas a serviços externos pagos** — Ollama, Whisper e Piper rodam na máquina.
 - **0 credenciais** necessárias para rodar.
-- **Latência de ponta a ponta: não medida ainda** (ver Limitações).
+- **Latência de ponta a ponta (fim da fala → início da resposta falada): não medida ainda** (ver Limitações).
 
 ---
 
@@ -105,7 +137,7 @@ poetry run voz-civica capture --file caminho/audio.wav --speak
 ### Testes
 ```bash
 poetry run pytest -q
-# 10 passed
+# 18 passed
 ```
 
 ---
@@ -137,7 +169,7 @@ Configuração avançada (limiares do VAD, modelo do Whisper, prompt inicial) fi
 │   ├── respond/      # Resposta via Ollama + extração do relato
 │   ├── tts/          # Síntese de voz com Piper
 │   ├── session/      # Registro do turno: log JSON + SQLite com auditoria
-│   ├── ui/           # Servidor FastAPI + UI pulsante (SSE)
+│   ├── ui/           # Servidor FastAPI + orb pulsante e botões (WebSocket)
 │   ├── config.py     # Configuração central (pydantic-settings)
 │   ├── orchestrator.py # Encadeia captura → STT → resposta → fala
 │   └── cli.py        # Ponto de entrada (argparse)
@@ -152,9 +184,12 @@ Configuração avançada (limiares do VAD, modelo do Whisper, prompt inicial) fi
 
 ## 📑 Limitações e Transparência
 
+- **Nenhuma conversa por microfone foi feita ainda**: toda a validação de ponta a ponta usou um arquivo `.wav`. O caminho `MicrophoneSource` existe e tem teste unitário, mas não foi exercitado ao vivo.
 - **Sem *barge-in***: não é possível interromper a IA no meio da fala. Limitação conhecida da versão 0.1, não bug.
-- **Anti-feedback não validado em cenário real**: `drain_pending` foi testado com arquivo, mas o caso crítico — mic aberto enquanto a caixa de som toca, sem headset — ainda não foi confirmado em execução real.
-- **Latência não medida**: nenhum benchmark de tempo de resposta foi publicado. Não há número de "tempo até a primeira palavra" neste README porque ele não foi medido.
+- **Anti-feedback não validado em cenário real**: `drain_pending` foi implementado e testado com arquivo, mas o caso crítico — mic aberto enquanto a caixa de som toca, sem headset — ainda não foi confirmado em execução real.
+- **Latência de ponta a ponta não medida**: só o estágio de transcrição tem número (~1,6–1,9 s para 2,5 s de áudio). Não existe medição do tempo entre o fim da fala e o início da resposta falada.
+- **Extração de relato não exercitada em execução real**: o pipeline gravou 2 sessões no SQLite, mas **0 relatos** — o extrator só tem cobertura de teste unitário.
+- **Interface verificada por script, não a olho**: a amplitude do orb e os três botões foram validados por cliente WebSocket (326 amostras, 86 níveis) e os testes rodam sem placa de som. **O visual em si não foi conferido manualmente no navegador.**
 - **Apenas pt-BR** e apenas CPU.
 - **UI sem autenticação**: o servidor `live` escuta em `127.0.0.1` e não deve ser exposto na rede.
 - **Sem CI, sem lint automatizado e sem empacotamento** (não está no PyPI; roda via `poetry`).

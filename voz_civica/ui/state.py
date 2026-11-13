@@ -7,9 +7,10 @@ por causa do callback síncrono do sounddevice) e o servidor FastAPI/WebSocket
 pontas só leem/escrevem alguns campos escalares, não precisa de nada mais
 sofisticado.
 
-Estágio 3: os estados "thinking"/"speaking_ai" ainda são simulados com timer
-falso, porque o LLM (Estágio 4) e o TTS (Estágio 5) ainda não existem. Nada
-aqui precisa mudar quando eles entrarem — só quem escreve o estado muda.
+Além do estado visual, guarda três controles vindos dos botões da UI:
+- `paused`: pausa/retoma a escuta do microfone;
+- `muted`: silencia a voz da IA (a resposta continua sendo gerada);
+- stop: pedido de interromper a fala em andamento (consumido pelo playback).
 """
 
 import threading
@@ -18,14 +19,17 @@ from dataclasses import dataclass
 
 @dataclass
 class UiSnapshot:
-    state: str  # "listening" | "speaking_user" | "thinking" | "speaking_ai"
-    amplitude: float  # 0.0–1.0, aproximado
+    state: str  # "listening" | "thinking" | "speaking_ai" | "paused"
+    amplitude: float  # 0.0–1.0 — vem SÓ da voz da IA, nunca do microfone
+    paused: bool = False
+    muted: bool = False
 
 
 class SharedUiState:
-    def __init__(self):
+    def __init__(self) -> None:
         self._lock = threading.Lock()
         self._snapshot = UiSnapshot(state="listening", amplitude=0.0)
+        self._stop = threading.Event()
 
     def update(self, state: str | None = None, amplitude: float | None = None) -> None:
         with self._lock:
@@ -36,4 +40,35 @@ class SharedUiState:
 
     def read(self) -> UiSnapshot:
         with self._lock:
-            return UiSnapshot(state=self._snapshot.state, amplitude=self._snapshot.amplitude)
+            return UiSnapshot(
+                state=self._snapshot.state,
+                amplitude=self._snapshot.amplitude,
+                paused=self._snapshot.paused,
+                muted=self._snapshot.muted,
+            )
+
+    # --- controles vindos da UI -------------------------------------------
+
+    def toggle_pause(self) -> bool:
+        with self._lock:
+            self._snapshot.paused = not self._snapshot.paused
+            if self._snapshot.paused:
+                self._snapshot.state = "paused"
+                self._snapshot.amplitude = 0.0
+            else:
+                self._snapshot.state = "listening"
+            return self._snapshot.paused
+
+    def toggle_mute(self) -> bool:
+        with self._lock:
+            self._snapshot.muted = not self._snapshot.muted
+            return self._snapshot.muted
+
+    def request_stop(self) -> None:
+        self._stop.set()
+
+    def should_stop(self) -> bool:
+        return self._stop.is_set()
+
+    def clear_stop(self) -> None:
+        self._stop.clear()

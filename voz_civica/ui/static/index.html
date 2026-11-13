@@ -2,159 +2,232 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>voz-civica</title>
 <style>
   :root {
-    --bg: #0a0b0f;
+    --bg: #07080c;
     --fg: #e6e8ee;
-    --fg-dim: #6b7280;
+    --fg-dim: #5b6270;
+    --btn-bg: rgba(255, 255, 255, 0.04);
+    --btn-border: rgba(255, 255, 255, 0.10);
+    --btn-active: rgba(255, 255, 255, 0.12);
   }
   * { box-sizing: border-box; }
   html, body {
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    height: 100%;
-    background: var(--bg);
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: radial-gradient(circle at 50% 45%, #0d1017 0%, var(--bg) 70%);
     color: var(--fg);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     overflow: hidden;
+    -webkit-user-select: none; user-select: none;
   }
   #app {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100vh;
-    gap: 28px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100vh; gap: 34px;
   }
-  canvas {
-    display: block;
-  }
+  #orb-wrap { position: relative; width: 360px; height: 360px; }
+  canvas { display: block; width: 360px; height: 360px; }
+
+  #status { display: flex; flex-direction: column; align-items: center; gap: 6px; }
   #label {
-    font-size: 14px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--fg-dim);
-    transition: color 0.4s ease;
+    font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--fg-dim); transition: color 0.35s ease;
   }
-  #label.connected { color: var(--fg); }
-  #disconnected-banner {
-    position: fixed;
-    top: 16px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: #3a1414;
-    color: #ff8a8a;
-    padding: 6px 14px;
-    border-radius: 999px;
-    font-size: 12px;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
+  #label.active { color: var(--fg); }
+  #sub { font-size: 11px; color: #3c414c; letter-spacing: 0.04em; }
+
+  #controls { display: flex; gap: 10px; }
+  button {
+    appearance: none; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 16px; border-radius: 999px;
+    background: var(--btn-bg); border: 1px solid var(--btn-border);
+    color: #aab0bd; font-size: 12.5px; font-family: inherit;
+    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, opacity 0.18s ease;
   }
-  #disconnected-banner.show { opacity: 1; }
+  button:hover:not(:disabled) { background: var(--btn-active); color: var(--fg); }
+  button:disabled { opacity: 0.3; cursor: default; }
+  button.on { background: rgba(255, 176, 60, 0.10); border-color: rgba(255, 176, 60, 0.35); color: #ffb03c; }
+  button svg { width: 14px; height: 14px; fill: currentColor; }
+
+  #banner {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+    background: #3a1414; color: #ff8a8a; padding: 6px 14px; border-radius: 999px;
+    font-size: 12px; opacity: 0; transition: opacity 0.3s ease; pointer-events: none;
+  }
+  #banner.show { opacity: 1; }
 </style>
 </head>
 <body>
 <div id="app">
-  <canvas id="orb" width="360" height="360"></canvas>
-  <div id="label">conectando...</div>
+  <div id="orb-wrap"><canvas id="orb" width="720" height="720"></canvas></div>
+
+  <div id="status">
+    <div id="label">conectando...</div>
+    <div id="sub">entrada: microfone do sistema</div>
+  </div>
+
+  <div id="controls">
+    <button id="btn-pause" title="Pausar/retomar a escuta (espaço)">
+      <svg viewBox="0 0 24 24"><path id="ico-pause" d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
+      <span id="txt-pause">pausar</span>
+    </button>
+    <button id="btn-mute" title="Silenciar/ativar a voz da IA (M)">
+      <svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
+      <span id="txt-mute">silenciar voz</span>
+    </button>
+    <button id="btn-stop" disabled title="Interromper a fala (Esc)">
+      <svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+      <span>parar fala</span>
+    </button>
+  </div>
 </div>
-<div id="disconnected-banner">desconectado — tentando reconectar</div>
+
+<div id="banner">desconectado — tentando reconectar</div>
 
 <script>
 const STATE_COLORS = {
-  listening:    { r: 90,  g: 140, b: 255 },  // azul calmo
-  speaking_user:{ r: 80,  g: 200, b: 255 },  // azul-ciano vivo
-  thinking:     { r: 255, g: 176, b: 60  },  // âmbar
-  speaking_ai:  { r: 90,  g: 230, b: 150 },  // verde
+  listening:   { r: 96,  g: 146, b: 255 },
+  thinking:    { r: 255, g: 176, b: 60  },
+  speaking_ai: { r: 96,  g: 232, b: 152 },
+  paused:      { r: 108, g: 116, b: 130 },
 };
-
 const STATE_LABELS = {
-  listening: "ouvindo",
-  speaking_user: "você está falando",
-  thinking: "pensando...",
-  speaking_ai: "respondendo",
+  listening:   "ouvindo",
+  thinking:    "pensando",
+  speaking_ai: "falando",
+  paused:      "pausado",
 };
 
 const canvas = document.getElementById("orb");
 const ctx = canvas.getContext("2d");
 const label = document.getElementById("label");
-const disconnectedBanner = document.getElementById("disconnected-banner");
+const banner = document.getElementById("banner");
+const btnPause = document.getElementById("btn-pause");
+const btnMute = document.getElementById("btn-mute");
+const btnStop = document.getElementById("btn-stop");
+const txtPause = document.getElementById("txt-pause");
+const txtMute = document.getElementById("txt-mute");
+const icoPause = document.getElementById("ico-pause");
 
-let targetAmplitude = 0.0;
+let targetAmplitude = 0.0;   // 0..1 — SÓ a voz da IA
 let displayAmplitude = 0.0;
 let currentState = "listening";
-let breathePhase = 0;
+let paused = false, muted = false, connected = false;
+let phase = 0;
 
-function lerp(a, b, t) { return a + (b - a) * t; }
+const lerp = (a, b, t) => a + (b - a) * t;
+
+function colorFor(state) {
+  const c = STATE_COLORS[state] || STATE_COLORS.listening;
+  if (state === "listening" && paused) return STATE_COLORS.paused;
+  return c;
+}
 
 function draw() {
-  const { width, height } = canvas;
-  ctx.clearRect(0, 0, width, height);
+  const W = canvas.width, H = canvas.height;
+  const cx = W / 2, cy = H / 2;
+  ctx.clearRect(0, 0, W, H);
 
-  const cx = width / 2;
-  const cy = height / 2;
-  const color = STATE_COLORS[currentState] || STATE_COLORS.listening;
+  // ataque rápido, queda lenta — dá a sensação de voz, não de medidor
+  const t = targetAmplitude > displayAmplitude ? 0.45 : 0.10;
+  displayAmplitude = lerp(displayAmplitude, targetAmplitude, t);
+  if (displayAmplitude < 0.002) displayAmplitude = 0;
 
-  // suaviza a amplitude exibida (o WebSocket manda em ~25Hz, isso deixa fluido)
-  displayAmplitude = lerp(displayAmplitude, targetAmplitude, 0.15);
+  const speaking = currentState === "speaking_ai";
+  const thinking = currentState === "thinking";
+  const idle = !speaking && !thinking && !paused;
 
-  // "respiração" contínua mesmo sem amplitude real (ex: durante thinking/speaking_ai simulados)
-  breathePhase += currentState === "thinking" ? 0.18 : 0.05;
-  const breathe = (Math.sin(breathePhase) + 1) / 2; // 0..1
+  phase += thinking ? 0.16 : 0.045;
+  const breathe = (Math.sin(phase) + 1) / 2;
 
-  const baseRadius = 70;
-  const amplitudeBoost = displayAmplitude * 60;
-  const breatheBoost = breathe * 12;
-  const radius = baseRadius + amplitudeBoost + breatheBoost;
+  const amp = speaking ? Math.pow(displayAmplitude, 0.75) : 0;
+  const R = 86 + amp * 74 + (idle ? breathe * 5 : 0) + (thinking ? breathe * 10 : 0);
+  const color = colorFor(currentState);
 
-  const glowRadius = radius * 1.8;
-  const gradient = ctx.createRadialGradient(cx, cy, radius * 0.3, cx, cy, glowRadius);
-  gradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, 0.9)`);
-  gradient.addColorStop(0.5, `rgba(${color.r}, ${color.g}, ${color.b}, 0.25)`);
-  gradient.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
+  // halo
+  const glowR = R * 2.05;
+  const g = ctx.createRadialGradient(cx, cy, R * 0.45, cx, cy, glowR);
+  const a1 = 0.34 + amp * 0.40;
+  g.addColorStop(0, `rgba(${color.r},${color.g},${color.b},${a1})`);
+  g.addColorStop(0.45, `rgba(${color.r},${color.g},${color.b},${a1 * 0.30})`);
+  g.addColorStop(1, `rgba(${color.r},${color.g},${color.b},0)`);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(cx, cy, glowR, 0, Math.PI * 2); ctx.fill();
 
-  ctx.fillStyle = gradient;
+  // anel externo fino (reage à amplitude)
   ctx.beginPath();
-  ctx.arc(cx, cy, glowRadius, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.arc(cx, cy, R + 14 + amp * 22, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${0.10 + amp * 0.45})`;
+  ctx.lineWidth = 2;
+  ctx.stroke();
 
-  ctx.fillStyle = `rgb(${color.r}, ${color.g}, ${color.b})`;
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius * 0.55, 0, Math.PI * 2);
-  ctx.fill();
+  // núcleo
+  const core = ctx.createRadialGradient(cx, cy - R * 0.25, R * 0.1, cx, cy, R * 0.86);
+  core.addColorStop(0, `rgba(255,255,255,${0.85 + amp * 0.15})`);
+  core.addColorStop(0.35, `rgba(${color.r},${color.g},${color.b},1)`);
+  core.addColorStop(1, `rgba(${color.r},${color.g},${color.b},0.72)`);
+  ctx.fillStyle = core;
+  ctx.beginPath(); ctx.arc(cx, cy, R * 0.78, 0, Math.PI * 2); ctx.fill();
 
   requestAnimationFrame(draw);
 }
 requestAnimationFrame(draw);
 
+function render() {
+  const st = paused ? "paused" : currentState;
+  label.textContent = connected ? (STATE_LABELS[st] || st) : "desconectado";
+  label.classList.toggle("active", connected && st !== "paused");
+  btnPause.classList.toggle("on", paused);
+  btnMute.classList.toggle("on", muted);
+  txtPause.textContent = paused ? "retomar" : "pausar";
+  txtMute.textContent = muted ? "ativar voz" : "silenciar voz";
+  icoPause.setAttribute("d", paused ? "M8 5l11 7-11 7z" : "M6 5h4v14H6zm8 0h4v14h-4z");
+  btnStop.disabled = !(connected && currentState === "speaking_ai");
+}
+
+let ws = null;
+function send(action) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action }));
+}
+
+btnPause.onclick = () => send("toggle_pause");
+btnMute.onclick = () => send("toggle_mute");
+btnStop.onclick = () => send("stop_speaking");
+
+addEventListener("keydown", (e) => {
+  if (e.code === "Space") { e.preventDefault(); send("toggle_pause"); }
+  else if (e.key.toLowerCase() === "m") send("toggle_mute");
+  else if (e.key === "Escape") send("stop_speaking");
+});
+
 function connect() {
-  const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${window.location.host}/ws`);
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
 
-  ws.onopen = () => {
-    disconnectedBanner.classList.remove("show");
-    label.classList.add("connected");
-  };
+  ws.onopen = () => { connected = true; banner.classList.remove("show"); render(); };
 
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    currentState = data.state;
-    targetAmplitude = data.amplitude;
-    label.textContent = STATE_LABELS[data.state] || data.state;
+  ws.onmessage = (ev) => {
+    const d = JSON.parse(ev.data);
+    // amplitude vem exclusivamente da voz da IA
+    currentState = d.state;
+    targetAmplitude = currentState === "speaking_ai" ? (d.amplitude || 0) : 0;
+    paused = !!d.paused;
+    muted = !!d.muted;
+    render();
   };
 
   ws.onclose = () => {
-    disconnectedBanner.classList.add("show");
-    label.classList.remove("connected");
-    label.textContent = "desconectado";
+    connected = false; targetAmplitude = 0;
+    banner.classList.add("show"); render();
     setTimeout(connect, 1500);
   };
 
   ws.onerror = () => ws.close();
 }
+
+render();
 connect();
 </script>
 </body>

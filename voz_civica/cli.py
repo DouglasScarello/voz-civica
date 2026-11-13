@@ -78,6 +78,7 @@ def main() -> None:
 
     live = subparsers.add_parser("live", help="Captura + UI pulsante no navegador (Estágio 3+)")
     live.add_argument("--device", help="Índice ou nome do dispositivo de captura")
+    live.add_argument("--file", help="Em vez do microfone, roda o pipeline sobre um arquivo .wav existente")
     live.add_argument("--host", default="127.0.0.1")
     live.add_argument("--port", type=int, default=8000)
     _add_common_args(live)
@@ -108,10 +109,16 @@ def main() -> None:
             sys.exit(0)
 
     elif args.command == "live":
-        from voz_civica.audio.sources.microphone import MicrophoneSource
         from voz_civica.orchestrator import run_live
 
-        source = MicrophoneSource(device=args.device)
+        if args.file:
+            from voz_civica.audio.sources.wavfile import FileSource
+
+            source = FileSource(args.file)
+        else:
+            from voz_civica.audio.sources.microphone import MicrophoneSource
+
+            source = MicrophoneSource(device=args.device)
 
         try:
             run_live(

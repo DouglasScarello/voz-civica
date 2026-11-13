@@ -2,8 +2,7 @@
 voz_civica/orchestrator.py
 
 Loop central que liga as camadas: fonte de áudio -> VAD -> transcrição ->
-resposta (LLM local) -> log (JSON + SQLite) -> terminal/UI. TTS (Estágio 5)
-ainda não existe — a resposta só é impressa, ainda não falada.
+resposta (LLM local) -> voz (Piper) -> log (JSON + SQLite) -> terminal/UI.
 """
 
 import hashlib
@@ -147,11 +146,15 @@ def listen_and_transcribe(
     last_state = VadState.NOT_SPEAKING
     for frame, prob, state, utterance in vad.process_stream(source.stream_frames()):
         if ui_state is not None:
-            amplitude = min(1.0, float(np.sqrt(np.mean(frame**2))) * 8.0)
-            ui_state.update(
-                state="speaking_user" if state == VadState.SPEAKING else "listening",
-                amplitude=amplitude,
-            )
+            if ui_state.read().paused:
+                # botão "pausar": consome os frames (pra fila não acumular) mas
+                # ignora qualquer fala detectada enquanto estiver pausado
+                ui_state.update(state="paused", amplitude=0.0)
+                last_state = VadState.NOT_SPEAKING
+                continue
+            # A bola pulsa SÓ com a voz da IA (amplitude vem do playback do TTS).
+            # O microfone não move a amplitude — só decide quando há fala.
+            ui_state.update(state="listening", amplitude=0.0)
 
         if state == VadState.SPEAKING and last_state == VadState.NOT_SPEAKING:
             console.print("[dim]... ouvindo[/dim]")
@@ -255,11 +258,25 @@ def listen_and_transcribe(
                     # pra não confundir isso com o início da próxima fala.
                     source.drain_pending()
 
-                    if ui_state is not None:
-                        ui_state.update(state="speaking_ai", amplitude=0.5)
-
-                    audio = synthesizer.synthesize(reply_text)
-                    playback.play(audio.samples, audio.samplerate)
+                    muted = ui_state is not None and ui_state.read().muted
+                    if muted:
+                        console.print("[dim](mudo: resposta não falada)[/dim]")
+                    else:
+                        audio = synthesizer.synthesize(reply_text)
+                        if ui_state is not None:
+                            ui_state.clear_stop()
+                            ui_state.update(state="speaking_ai", amplitude=0.0)
+                            aborted = playback.play_stream(
+                                audio.samples,
+                                audio.samplerate,
+                                on_level=lambda level: ui_state.update(amplitude=level),
+                                should_abort=ui_state.should_stop,
+                            )
+                            ui_state.clear_stop()
+                            if aborted:
+                                console.print("[yellow](fala interrompida)[/yellow]")
+                        else:
+                            playback.play(audio.samples, audio.samplerate)
 
                     # Anti-feedback: descarta o que o mic captou ENQUANTO a
                     # IA falava — sem isso, ela se autoescuta e dispara uma
